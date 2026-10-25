@@ -4,6 +4,7 @@ mod config;
 mod db;
 mod keys;
 mod messages;
+mod p2p;
 mod settings;
 mod signal;
 mod state;
@@ -13,6 +14,7 @@ use crate::config::ServerConfig;
 use crate::state::AppState;
 use axum::{routing::{get, post}, Router};
 use std::sync::Arc;
+use shared::crypto;
 use tokio::sync::broadcast;
 use sqlx;
 
@@ -23,10 +25,13 @@ async fn main() {
     let pool = db::connect(&cfg.database_url).await;
     db::migrate(&pool).await;
     let (tx, _rx) = broadcast::channel(256);
+    let (server_pk, server_sk) = crypto::mldsa::keypair();
     let state = AppState {
         pool: pool.clone(),
         config: Arc::new(cfg.clone()),
         broadcast: tx,
+        server_mldsa_pk: server_pk,
+        server_mldsa_sk: server_sk,
     };
 
     let app = Router::new()
@@ -42,6 +47,8 @@ async fn main() {
         .route("/keys/announcements", get(keys::fetch_key_announcements))
         .route("/admin/settings", get(settings::get_settings).post(settings::set_setting))
         .route("/signal", post(signal::send_signal))
+        .route("/p2p/server-key", get(p2p::server_key))
+        .route("/p2p/authorize", post(p2p::authorize))
         .route("/signals", get(signal::poll_signals))
         .route("/admin/accounts/:account_id", axum::routing::delete(auth::delete_account))
         .route("/accounts/:account_id/devices", get(auth::list_devices))

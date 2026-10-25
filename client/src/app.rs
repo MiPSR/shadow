@@ -27,6 +27,8 @@ pub struct ShadowApp {
     pub selected_channel: Option<String>,
     pub messages: Vec<EncryptedMessage>,
     pub channel_keys: HashMap<String, [u8; 32]>,
+    pub voice: Option<crate::voice::VoiceSession>,
+    pub peer_addr_input: String,
 }
 
 impl ShadowApp {
@@ -50,6 +52,8 @@ impl ShadowApp {
             selected_channel: None,
             messages: Vec::new(),
             channel_keys: HashMap::new(),
+            voice: None,
+            peer_addr_input: String::new(),
         }
     }
 
@@ -163,6 +167,28 @@ impl ShadowApp {
                         self.status = "device registered".into();
                     }
                     Err(e) => self.status = e,
+                }
+            }
+            ui.separator();
+            ui.label("Voice peer addr");
+            ui.text_edit_singleline(&mut self.peer_addr_input);
+            if self.voice.is_none() {
+                if ui.button("Start voice").clicked() {
+                    if let Some(ch) = &self.selected_channel {
+                        if let Some(key) = self.channel_keys.get(ch).copied() {
+                            if let Ok(addr) = self.peer_addr_input.parse() {
+                                match crate::voice::VoiceSession::start(addr, key) {
+                                    Ok(v) => { self.voice = Some(v); self.status = "voice started".into(); }
+                                    Err(e) => self.status = e,
+                                }
+                            } else { self.status = "bad address".into(); }
+                        } else { self.status = "no channel key".into(); }
+                    } else { self.status = "no channel".into(); }
+                }
+            } else {
+                if ui.button("Stop voice").clicked() {
+                    if let Some(mut v) = self.voice.take() { v.stop(); }
+                    self.status = "voice stopped".into();
                 }
             }
             ui.separator();
