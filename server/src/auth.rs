@@ -273,3 +273,20 @@ pub async fn revoke_device(
     sqlx::query("DELETE FROM sessions WHERE device_id=?1").bind(&device_id).execute(&state.pool).await.ok();
     Ok(Json(serde_json::json!({"ok": true})))
 }
+
+pub async fn account_data(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(account_id): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if !admin_authorized(&headers, &state) { return Err(StatusCode::FORBIDDEN); }
+    let acct: Option<(String,String,String,i64)> = sqlx::query_as("SELECT id, username, auth_methods, is_admin FROM accounts WHERE id=?1")
+        .bind(&account_id).fetch_optional(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let Some((id,username,methods,is_admin)) = acct else { return Err(StatusCode::NOT_FOUND); };
+    let devices: Vec<(String,)> = sqlx::query_as("SELECT id FROM devices WHERE account_id=?1")
+        .bind(&account_id).fetch_all(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(serde_json::json!({
+        "account": {"id": id, "username": username, "auth_methods": methods, "is_admin": is_admin},
+        "devices": devices.into_iter().map(|(d,)| d).collect::<Vec<_>>(),
+    })))
+}

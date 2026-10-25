@@ -15,6 +15,8 @@ mod screen;
 #[cfg(not(target_arch = "wasm32"))]
 mod storage;
 #[cfg(not(target_arch = "wasm32"))]
+mod p2p;
+#[cfg(not(target_arch = "wasm32"))]
 mod voice;
 #[cfg(not(target_arch = "wasm32"))]
 mod wsclient;

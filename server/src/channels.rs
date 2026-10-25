@@ -55,3 +55,32 @@ pub async fn list_channels(
     }
     Ok(Json(out))
 }
+
+pub async fn add_member(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(channel_id): axum::extract::Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<Channel>, StatusCode> {
+    let token = headers.get("authorization").and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer ")).map(|s| s.to_string())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let _dev = crate::auth::device_from_token(&state.pool, &token).await.ok_or(StatusCode::UNAUTHORIZED)?;
+    let account_id = body.get("account_id").and_then(|v| v.as_str()).ok_or(StatusCode::BAD_REQUEST)?.to_string();
+    // load channel
+    let row: Option<(String,String,String,String)> = sqlx::query_as("SELECT id,name,kind,members FROM channels WHERE id=?1")
+        .bind(&channel_id).fetch_optional(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let Some((id,name,kind,members)) = row else { return Err(StatusCode::NOT_FOUND); };
+    let mut mems: Vec<String> = serde_json::from_str(&members).unwrap_or_default();
+    if !mems.contains(&account_id) { mems.push(account_id); }
+    let mems_json = serde_json::to_string(&mems).unwrap();
+    sqlx::query("UPDATE channels SET members=?1 WHERE id=?2").bind(&mems_json).bind(&channel_id).execute(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let kind = match kind.as_str() {
+        "Direct" => shared::protocol::ChannelKind::Direct,
+        "Group" => shared::protocol::ChannelKind::Group,
+        "Text" => shared::protocol::ChannelKind::Text,
+        "Voice" => shared::protocol::ChannelKind::Voice,
+        _ => shared::protocol::ChannelKind::Text,
+    };
+    Ok(Json(shared::protocol::Channel { id, name, kind, members: mems }))
+}

@@ -142,3 +142,36 @@ impl Api {
         Ok(())
     }
 }
+
+impl Api {
+    pub fn server_key(&self) -> Result<String, String> {
+        let resp = self.client.get(self.url("/p2p/server-key")).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        let v: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
+        Ok(v.get("public_key").and_then(|x| x.as_str()).unwrap_or("").to_string())
+    }
+    pub fn authorize_p2p(&self, token: &str, action: &str, peer_device: &str, channel_id: Option<&str>) -> Result<serde_json::Value, String> {
+        let mut body = serde_json::json!({"action": action, "peer_device": peer_device});
+        if let Some(c) = channel_id { body["channel_id"] = serde_json::json!(c); }
+        let resp = self.client.post(self.url("/p2p/authorize")).bearer_auth(token).json(&body).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        resp.json().map_err(|e| e.to_string())
+    }
+}
+
+impl Api {
+    pub fn add_channel_member(&self, token: &str, channel_id: &str, account_id: &str) -> Result<Channel, String> {
+        let body = serde_json::json!({"account_id": account_id});
+        let resp = self.client.post(self.url(&format!("/channels/{}/members", channel_id))).bearer_auth(token).json(&body).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        resp.json().map_err(|e| e.to_string())
+    }
+}
+
+impl Api {
+    pub fn account_data(&self, admin_token: &str, account_id: &str) -> Result<serde_json::Value, String> {
+        let resp = self.client.get(self.url(&format!("/admin/accounts/{}/data", account_id))).header("x-admin-token", admin_token).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        resp.json().map_err(|e| e.to_string())
+    }
+}

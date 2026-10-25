@@ -97,7 +97,7 @@ impl ShadowApp {
                 self.device = Some(d);
                 true
             }
-            Err(e) => { self.status = e; false }
+            Err(e) => { if e.contains("Forbidden") || e.contains("401") || e.contains("Unauthorized") { clear_device(); self.device = None; self.screen = Screen::Setup; } self.status = e; false }
         }
     }
 }
@@ -188,9 +188,31 @@ impl ShadowApp {
                     if let Some(ch) = &self.selected_channel {
                         if let Some(key) = self.channel_keys.get(ch).and_then(|v| v.last().map(|x| x.0)) {
                             if let Ok(addr) = self.peer_addr_input.parse() {
-                                match crate::voice::VoiceSession::start(addr, key) {
-                                    Ok(v) => { self.voice = Some(v); self.status = "voice started".into(); }
-                                    Err(e) => self.status = e,
+                                // P2P authorization
+                                let mut ok = true;
+                                if let Some(dev) = &self.device {
+                                    if let Some(tok) = &dev.session_token {
+                                        if let Ok(cred) = self.api.authorize_p2p(tok, "voice", &dev.device_id, Some(ch)) {
+                                            if let Ok(spk) = self.api.server_key() {
+                                                let from = cred.get("from_device").and_then(|x| x.as_str()).unwrap_or("");
+                                                let action = cred.get("action").and_then(|x| x.as_str()).unwrap_or("");
+                                                let peer = cred.get("peer_device").and_then(|x| x.as_str()).unwrap_or("");
+                                                let chan = cred.get("channel_id").and_then(|x| x.as_str()).unwrap_or("");
+                                                let exp = cred.get("expires_at").and_then(|x| x.as_i64()).unwrap_or(0);
+                                                let sig = cred.get("signature").and_then(|x| x.as_str()).unwrap_or("");
+                                                if !crate::p2p::verify_credential(&spk, from, action, peer, chan, exp, sig) {
+                                                    self.status = "p2p credential invalid".into();
+                                                    ok = false;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                if ok {
+                                    match crate::voice::VoiceSession::start(addr, key) {
+                                        Ok(v) => { self.voice = Some(v); self.status = "voice started".into(); }
+                                        Err(e) => self.status = e,
+                                    }
                                 }
                             } else { self.status = "bad address".into(); }
                         } else { self.status = "no channel key".into(); }
