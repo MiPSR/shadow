@@ -15,6 +15,8 @@ use crate::config::ServerConfig;
 use crate::state::AppState;
 use axum::{routing::{get, post}, Router};
 use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::Mutex;
 use shared::crypto;
 use tokio::sync::broadcast;
 use sqlx;
@@ -33,6 +35,7 @@ async fn main() {
         broadcast: tx,
         server_mldsa_pk: server_pk,
         server_mldsa_sk: server_sk,
+        pubkey_cache: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let app = Router::new()

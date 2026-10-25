@@ -76,6 +76,15 @@ pub async fn register_device(
         .execute(&state.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // cache
+    {
+        let mut c = state.pubkey_cache.lock().unwrap();
+        c.insert(req.device_id.clone(), crate::state::CachedKey {
+            mldsa_pk: req.mldsa_pk.clone(),
+            mlkem_pk: req.mlkem_pk.clone(),
+            expires_at: now() + state.config.key_cache_hours * 3600,
+        });
+    }
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
@@ -198,6 +207,15 @@ pub async fn get_device(
         .and_then(|s| s.strip_prefix("Bearer ")).map(|s| s.to_string())
         .ok_or(StatusCode::UNAUTHORIZED)?;
     let _dev = device_from_token(&state.pool, &token).await.ok_or(StatusCode::UNAUTHORIZED)?;
+    // cache check
+    {
+        let mut c = state.pubkey_cache.lock().unwrap();
+        if let Some(ck) = c.get(&device_id) {
+            if ck.expires_at > now() {
+                return Ok(Json(shared::protocol::Device { id: device_id.clone(), account_id: String::new(), mldsa_pk: ck.mldsa_pk.clone(), mlkem_pk: ck.mlkem_pk.clone(), revoked: false }));
+            }
+        }
+    }
     let row: Option<(String,String,String,String,i64)> = sqlx::query_as(
         "SELECT id, account_id, mldsa_pk, mlkem_pk, revoked FROM devices WHERE id=?1"
     )
@@ -206,6 +224,15 @@ pub async fn get_device(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let Some((id, account_id, mldsa_pk, mlkem_pk, revoked)) = row else { return Err(StatusCode::NOT_FOUND); };
+    // update cache
+    {
+        let mut c = state.pubkey_cache.lock().unwrap();
+        c.insert(device_id.clone(), crate::state::CachedKey {
+            mldsa_pk: mldsa_pk.clone(),
+            mlkem_pk: mlkem_pk.clone(),
+            expires_at: now() + state.config.key_cache_hours * 3600,
+        });
+    }
     Ok(Json(shared::protocol::Device { id, account_id, mldsa_pk, mlkem_pk, revoked: revoked != 0 }))
 }
 
@@ -241,6 +268,7 @@ pub async fn revoke_device(
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     if !admin_authorized(&headers, &state) { return Err(StatusCode::FORBIDDEN); }
     sqlx::query("UPDATE devices SET revoked=1 WHERE id=?1").bind(&device_id).execute(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    state.pubkey_cache.lock().unwrap().remove(&device_id);
     // remove sessions
     sqlx::query("DELETE FROM sessions WHERE device_id=?1").bind(&device_id).execute(&state.pool).await.ok();
     Ok(Json(serde_json::json!({"ok": true})))
