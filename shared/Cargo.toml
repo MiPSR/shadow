@@ -1,0 +1,21 @@
+[package]
+name = "shared"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Post-quantum cryptography
+pqcrypto-mldsa = "0.1"
+pqcrypto-mlkem = "0.1"
+pqcrypto-traits = "0.3"
+# Symmetric
+chacha20poly1305 = "0.10"
+# Encoding
+base64 = "0.22"
+hex = "0.4"
+# errors
+thiserror = "1"
+getrandom = "0.2"
