@@ -64,18 +64,23 @@ async fn main() {
         .route("/accounts/:account_id/devices", get(auth::list_devices))
         .route("/devices/:device_id", get(auth::get_device))
         .merge(ws::router())
-        .with_state(state);
+        .with_state(state.clone());
 
     let addr: std::net::SocketAddr = cfg.bind.parse().unwrap();
     tracing::info!("listening on {}", addr);
     // retention cleanup task
     let pool2 = pool.clone();
+    let cache2 = state.pubkey_cache.clone();
     let retention = cfg.message_retention_days;
     tokio::spawn(async move {
         loop {
             let cutoff = chrono::Utc::now().timestamp() - retention * 86400;
             let _ = sqlx::query("DELETE FROM messages WHERE created_at < ?1").bind(cutoff).execute(&pool2).await;
             let _ = sqlx::query("DELETE FROM sessions WHERE expires_at < ?1").bind(chrono::Utc::now().timestamp()).execute(&pool2).await;
+            // clean expired pubkey cache
+            if let Ok(mut c) = cache2.lock() {
+                c.retain(|_, v| v.expires_at > chrono::Utc::now().timestamp());
+            }
             tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
         }
     });

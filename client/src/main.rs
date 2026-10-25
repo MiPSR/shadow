@@ -36,7 +36,13 @@ use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn start(_canvas_id: &str) -> Result<(), wasm_bindgen::JsValue> {
+pub fn start(canvas_id: &str) -> Result<(), wasm_bindgen::JsValue> {
+    let window = web_sys::window().ok_or_else(|| wasm_bindgen::JsValue::from_str("no window"))?;
+    let document = window.document().ok_or_else(|| wasm_bindgen::JsValue::from_str("no document"))?;
+    let canvas = document.get_element_by_id(canvas_id).ok_or_else(|| wasm_bindgen::JsValue::from_str("canvas not found"))?;
+    if canvas.dyn_ref::<web_sys::HtmlCanvasElement>().is_none() {
+        return Err(wasm_bindgen::JsValue::from_str("invalid canvas"));
+    }
     Ok(())
 }
 

@@ -21,6 +21,7 @@ pub struct ShadowApp {
     pub account_id_input: String,
     pub channel_name_input: String,
     pub message_input: String,
+    pub member_account_input: String,
     pub status: String,
     // data
     pub channels: Vec<Channel>,
@@ -56,6 +57,7 @@ impl ShadowApp {
             account_id_input: String::new(),
             channel_name_input: String::new(),
             message_input: String::new(),
+            member_account_input: String::new(),
             status: String::new(),
             channels: Vec::new(),
             selected_channel: None,
@@ -229,9 +231,30 @@ impl ShadowApp {
                     if let Some(ch) = &self.selected_channel {
                         if let Some(key) = self.channel_keys.get(ch).and_then(|v| v.last().map(|x| x.0)) {
                             if let Ok(addr) = self.peer_addr_input.parse() {
-                                match crate::screen::ScreenSession::start(addr, key) {
-                                    Ok(v) => { self.screen_session = Some(v); self.status = "screen started".into(); }
-                                    Err(e) => self.status = e,
+                                let mut ok = true;
+                                if let Some(dev) = &self.device {
+                                    if let Some(tok) = &dev.session_token {
+                                        if let Ok(cred) = self.api.authorize_p2p(tok, "screen", &dev.device_id, Some(ch)) {
+                                            if let Ok(spk) = self.api.server_key() {
+                                                let from = cred.get("from_device").and_then(|x| x.as_str()).unwrap_or("");
+                                                let action = cred.get("action").and_then(|x| x.as_str()).unwrap_or("");
+                                                let peer = cred.get("peer_device").and_then(|x| x.as_str()).unwrap_or("");
+                                                let chan = cred.get("channel_id").and_then(|x| x.as_str()).unwrap_or("");
+                                                let exp = cred.get("expires_at").and_then(|x| x.as_i64()).unwrap_or(0);
+                                                let sig = cred.get("signature").and_then(|x| x.as_str()).unwrap_or("");
+                                                if !crate::p2p::verify_credential(&spk, from, action, peer, chan, exp, sig) {
+                                                    self.status = "p2p credential invalid".into();
+                                                    ok = false;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                if ok {
+                                    match crate::screen::ScreenSession::start(addr, key) {
+                                        Ok(v) => { self.screen_session = Some(v); self.status = "screen started".into(); }
+                                        Err(e) => self.status = e,
+                                    }
                                 }
                             } else { self.status = "bad address".into(); }
                         } else { self.status = "no channel key".into(); }
@@ -445,6 +468,49 @@ impl ShadowApp {
                                 }
                             } else {
                                 self.status = "no channel key".into();
+                            }
+                        }
+                    }
+                }
+                ui.separator();
+                ui.text_edit_singleline(&mut self.member_account_input);
+                if ui.button("Add member").clicked() {
+                    if let Some(dev) = &self.device {
+                        if let Some(tok) = &dev.session_token {
+                            let ch = ch.clone();
+                            match self.api.add_channel_member(tok, &ch, &self.member_account_input) {
+                                Ok(_) => {
+                                    // redistribute current key to new member
+                                    if let Some(key) = self.channel_keys.get(&ch).and_then(|v| v.last().map(|x| x.0)) {
+                                        if let Ok(devs) = self.api.list_devices(tok, &self.member_account_input) {
+                                            for d in devs {
+                                                if d.revoked { continue; }
+                                                if let Ok(pk) = crypto::b64_decode(&d.mlkem_pk) {
+                                                    if let Ok((ss, ct)) = crypto::mlkem::encapsulate(&pk) {
+                                                        let mut sskey = [0u8;32];
+                                                        if ss.len() >= 32 { sskey.copy_from_slice(&ss[..32]); }
+                                                        let w = crypto::xchacha::encrypt(&sskey, &key, &[]).unwrap();
+                                                        let msg = format!("key:{}:{}:{}", dev.device_id, d.id, ch);
+                                                        let sk = crypto::b64_decode(&dev.mldsa_sk).unwrap();
+                                                        let sig = crypto::mldsa::sign(&sk, msg.as_bytes()).unwrap();
+                                                        let ann = KeyAnnouncement {
+                                                            from_device: dev.device_id.clone(),
+                                                            to_device: d.id.clone(),
+                                                            channel_id: Some(ch.clone()),
+                                                            kem_ciphertext: crypto::b64_encode(&ct),
+                                                            nonce: crypto::b64_encode(&w.0),
+                                                            wrapped_key: crypto::b64_encode(&w.1),
+                                                            signature: crypto::b64_encode(&sig),
+                                                        };
+                                                        let _ = self.api.announce_key(tok, &ann);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    self.status = "member added".into();
+                                }
+                                Err(e) => self.status = e,
                             }
                         }
                     }

@@ -18,6 +18,8 @@ pub async fn set_setting(State(state): State<AppState>, headers: HeaderMap, Json
     if !admin_ok(&headers, &state) { return Err(StatusCode::FORBIDDEN); }
     if let Some(obj) = body.as_object() {
         for (k,v) in obj {
+            // validate known settings
+            if !matches!(k.as_str(), "message_retention_days" | "key_cache_hours" | "max_upload_bytes") { continue; }
             let val = v.as_str().map(|s| s.to_string()).unwrap_or_else(|| v.to_string());
             sqlx::query("INSERT OR REPLACE INTO settings (key, value) VALUES (?1,?2)")
                 .bind(k).bind(&val).execute(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
