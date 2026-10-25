@@ -17,6 +17,7 @@ uuid = { version = "1", features = ["v4"] }
 base64 = "0.22"
 chrono = "0.4"
 thiserror = "1"
+image = "0.25"
 scrap = "0.5"
 cpal = "0.15"
 opus = "0.3"

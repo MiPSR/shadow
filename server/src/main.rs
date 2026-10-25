@@ -3,6 +3,7 @@ mod channels;
 mod config;
 mod db;
 mod keys;
+mod attachments;
 mod messages;
 mod p2p;
 mod settings;
@@ -47,6 +48,8 @@ async fn main() {
         .route("/keys/announcements", get(keys::fetch_key_announcements))
         .route("/admin/settings", get(settings::get_settings).post(settings::set_setting))
         .route("/signal", post(signal::send_signal))
+        .route("/attachments", post(attachments::upload))
+        .route("/attachments/:id", get(attachments::download))
         .route("/p2p/server-key", get(p2p::server_key))
         .route("/p2p/authorize", post(p2p::authorize))
         .route("/signals", get(signal::poll_signals))

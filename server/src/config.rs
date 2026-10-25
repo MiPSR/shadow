@@ -12,6 +12,8 @@ pub struct ServerConfig {
     pub message_retention_days: i64,
     #[serde(default = "default_key_cache_hours")]
     pub key_cache_hours: i64,
+    #[serde(default = "default_max_upload")]
+    pub max_upload_bytes: u64,
 }
 
 fn default_bind() -> String { "0.0.0.0:8080".into() }
@@ -19,6 +21,7 @@ fn default_database() -> String { "sqlite:shadow.db?mode=rwc".into() }
 fn default_bootstrap() -> String { "change-me".into() }
 fn default_retention_days() -> i64 { 7 }
 fn default_key_cache_hours() -> i64 { 24 }
+fn default_max_upload() -> u64 { 10 * 1024 * 1024 }
 
 impl Default for ServerConfig {
     fn default() -> Self {
@@ -28,6 +31,7 @@ impl Default for ServerConfig {
             bootstrap_admin_token: default_bootstrap(),
             message_retention_days: default_retention_days(),
             key_cache_hours: default_key_cache_hours(),
+            max_upload_bytes: default_max_upload(),
         }
     }
 }

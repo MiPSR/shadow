@@ -66,6 +66,14 @@ pub async fn migrate(pool: &SqlitePool) {
             payload TEXT NOT NULL,
             created_at INTEGER NOT NULL
         )"#,
+        r#"CREATE TABLE IF NOT EXISTS attachments (
+            id TEXT PRIMARY KEY,
+            message_id TEXT,
+            size INTEGER NOT NULL,
+            media_type TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        )"#,
     ];
     for s in stmts {
         sqlx::query(s).execute(pool).await.expect("migrate");

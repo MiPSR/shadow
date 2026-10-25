@@ -93,3 +93,22 @@ impl Api {
         resp.json().map_err(|e| e.to_string())
     }
 }
+
+impl Api {
+    pub fn upload_attachment(&self, token: &str, media_type: &str, payload_b64: &str, message_id: Option<&str>) -> Result<String, String> {
+        let mut body = serde_json::json!({"media_type": media_type, "payload": payload_b64});
+        if let Some(m) = message_id { body["message_id"] = serde_json::json!(m); }
+        let resp = self.client.post(self.url("/attachments")).bearer_auth(token).json(&body).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        let v: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
+        Ok(v.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string())
+    }
+    pub fn download_attachment(&self, token: &str, id: &str) -> Result<(String,String), String> {
+        let resp = self.client.get(self.url(&format!("/attachments/{}", id))).bearer_auth(token).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        let v: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
+        let payload = v.get("payload").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let mt = v.get("media_type").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        Ok((payload, mt))
+    }
+}
