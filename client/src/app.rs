@@ -28,6 +28,7 @@ pub struct ShadowApp {
     pub messages: Vec<EncryptedMessage>,
     pub channel_keys: HashMap<String, [u8; 32]>,
     pub voice: Option<crate::voice::VoiceSession>,
+    pub screen_session: Option<crate::screen::ScreenSession>,
     pub peer_addr_input: String,
 }
 
@@ -53,6 +54,7 @@ impl ShadowApp {
             messages: Vec::new(),
             channel_keys: HashMap::new(),
             voice: None,
+            screen_session: None,
             peer_addr_input: String::new(),
         }
     }
@@ -189,6 +191,25 @@ impl ShadowApp {
                 if ui.button("Stop voice").clicked() {
                     if let Some(mut v) = self.voice.take() { v.stop(); }
                     self.status = "voice stopped".into();
+                }
+            }
+            if self.screen_session.is_none() {
+                if ui.button("Start screen share").clicked() {
+                    if let Some(ch) = &self.selected_channel {
+                        if let Some(key) = self.channel_keys.get(ch).copied() {
+                            if let Ok(addr) = self.peer_addr_input.parse() {
+                                match crate::screen::ScreenSession::start(addr, key) {
+                                    Ok(v) => { self.screen_session = Some(v); self.status = "screen started".into(); }
+                                    Err(e) => self.status = e,
+                                }
+                            } else { self.status = "bad address".into(); }
+                        } else { self.status = "no channel key".into(); }
+                    } else { self.status = "no channel".into(); }
+                }
+            } else {
+                if ui.button("Stop screen").clicked() {
+                    if let Some(mut v) = self.screen_session.take() { v.stop(); }
+                    self.status = "screen stopped".into();
                 }
             }
             ui.separator();

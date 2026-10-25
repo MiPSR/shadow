@@ -3,6 +3,7 @@ mod app;
 mod config;
 mod storage;
 mod voice;
+mod screen;
 
 use app::ShadowApp;
 

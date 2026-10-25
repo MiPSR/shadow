@@ -21,7 +21,7 @@
             packages = [ pkgs.cargo pkgs.rustc pkgs.rustfmt pkgs.clippy pkgs.pkg-config pkgs.openssl pkgs.sqlite ];
           };
           client = pkgs.mkShell {
-            packages = [ pkgs.cargo pkgs.rustc pkgs.rustfmt pkgs.clippy pkgs.pkg-config pkgs.openssl pkgs.alsa-lib pkgs.cmake pkgs.opus ];
+            packages = [ pkgs.cargo pkgs.rustc pkgs.rustfmt pkgs.clippy pkgs.pkg-config pkgs.openssl pkgs.alsa-lib pkgs.cmake pkgs.opus pkgs.xorg.libxcb ];
           };
         };
 
@@ -42,7 +42,7 @@
             cargoLock = { lockFile = ./Cargo.lock; };
             buildAndTestSubdir = "client";
             nativeBuildInputs = [ pkgs.pkg-config pkgs.cmake ];
-            buildInputs = [ pkgs.openssl pkgs.alsa-lib pkgs.opus ];
+            buildInputs = [ pkgs.openssl pkgs.alsa-lib pkgs.opus pkgs.xorg.libxcb ];
           };
         };
       });
