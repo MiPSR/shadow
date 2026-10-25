@@ -26,7 +26,7 @@ pub struct ShadowApp {
     pub channels: Vec<Channel>,
     pub selected_channel: Option<String>,
     pub messages: Vec<EncryptedMessage>,
-    pub channel_keys: HashMap<String, [u8; 32]>,
+    pub channel_keys: HashMap<String, Vec<([u8;32], i64)>>,
     pub ws_messages: std::sync::Arc<std::sync::Mutex<Vec<EncryptedMessage>>>,
     pub voice: Option<crate::voice::VoiceSession>,
     pub screen_session: Option<crate::screen::ScreenSession>,
@@ -186,7 +186,7 @@ impl ShadowApp {
             if self.voice.is_none() {
                 if ui.button("Start voice").clicked() {
                     if let Some(ch) = &self.selected_channel {
-                        if let Some(key) = self.channel_keys.get(ch).copied() {
+                        if let Some(key) = self.channel_keys.get(ch).and_then(|v| v.last().map(|x| x.0)) {
                             if let Ok(addr) = self.peer_addr_input.parse() {
                                 match crate::voice::VoiceSession::start(addr, key) {
                                     Ok(v) => { self.voice = Some(v); self.status = "voice started".into(); }
@@ -205,7 +205,7 @@ impl ShadowApp {
             if self.screen_session.is_none() {
                 if ui.button("Start screen share").clicked() {
                     if let Some(ch) = &self.selected_channel {
-                        if let Some(key) = self.channel_keys.get(ch).copied() {
+                        if let Some(key) = self.channel_keys.get(ch).and_then(|v| v.last().map(|x| x.0)) {
                             if let Ok(addr) = self.peer_addr_input.parse() {
                                 match crate::screen::ScreenSession::start(addr, key) {
                                     Ok(v) => { self.screen_session = Some(v); self.status = "screen started".into(); }
@@ -221,6 +221,29 @@ impl ShadowApp {
                     self.status = "screen stopped".into();
                 }
             }
+            ui.separator();
+            ui.collapsing("Admin", |ui| {
+                ui.text_edit_singleline(&mut self.admin_token_input);
+                if ui.button("List accounts").clicked() {
+                    match self.api.list_accounts(&self.admin_token_input) {
+                        Ok(accs) => self.status = format!("{} accounts", accs.len()),
+                        Err(e) => self.status = e,
+                    }
+                }
+                ui.text_edit_singleline(&mut self.account_id_input);
+                if ui.button("Delete account").clicked() {
+                    match self.api.delete_account_admin(&self.admin_token_input, &self.account_id_input) {
+                        Ok(()) => self.status = "deleted".into(),
+                        Err(e) => self.status = e,
+                    }
+                }
+                if ui.button("Revoke device (by id)").clicked() {
+                    match self.api.revoke_device(&self.admin_token_input, &self.account_id_input) {
+                        Ok(()) => self.status = "revoked".into(),
+                        Err(e) => self.status = e,
+                    }
+                }
+            });
             ui.separator();
             ui.label(&self.status);
         });
@@ -260,7 +283,7 @@ impl ShadowApp {
                             Ok(ch) => {
                                 let mut key = [0u8; 32];
                                 getrandom::getrandom(&mut key).ok();
-                                self.channel_keys.insert(ch.id.clone(), key);
+                                self.channel_keys.insert(ch.id.clone(), vec![(key, chrono::Utc::now().timestamp())]);
                                 let ch_id = ch.id.clone();
                                 let members = req.members.clone();
                                 for m in members {
@@ -335,7 +358,8 @@ impl ShadowApp {
                                             if pt.len() >= 32 {
                                                 let mut key = [0u8;32];
                                                 key.copy_from_slice(&pt[..32]);
-                                                self.channel_keys.insert(ch.clone(), key);
+                                                let entry = self.channel_keys.entry(ch.clone()).or_default();
+                                                entry.push((key, chrono::Utc::now().timestamp()));
                                             }
                                         }
                                     }
@@ -357,14 +381,18 @@ impl ShadowApp {
                 ui.heading(ch.clone());
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for m in &self.messages {
-                        let text = if let Some(key) = self.channel_keys.get(ch) {
-                            // payload base64: nonce 24 + ct
+                        let text = if let Some(keys) = self.channel_keys.get(ch) {
                             if let Ok(raw) = crypto::b64_decode(&m.payload) {
                                 if raw.len() >= 24 {
                                     let (nonce, ct) = raw.split_at(24);
-                                    if let Ok(pt) = crypto::xchacha::decrypt(key, nonce, ct, &[]) {
-                                        String::from_utf8_lossy(&pt).to_string()
-                                    } else { "[decrypt failed]".into() }
+                                    let mut done = None;
+                                    for (k, _) in keys.iter().rev() {
+                                        if let Ok(pt) = crypto::xchacha::decrypt(k, nonce, ct, &[]) {
+                                            done = Some(String::from_utf8_lossy(&pt).to_string());
+                                            break;
+                                        }
+                                    }
+                                    done.unwrap_or_else(|| "[decrypt failed]".into())
                                 } else { "[bad payload]".into() }
                             } else { "[bad b64]".into() }
                         } else {
@@ -378,7 +406,7 @@ impl ShadowApp {
                 if ui.button("Send").clicked() {
                     if let Some(dev) = &self.device {
                         if let Some(tok) = &dev.session_token {
-                            if let Some(key) = self.channel_keys.get(ch).copied() {
+                            if let Some(key) = self.channel_keys.get(ch).and_then(|v| v.last().map(|x| x.0)) {
                                 // encrypt message_input
                                 let pt = self.message_input.as_bytes();
                                 if let Ok((nonce, ct)) = crypto::xchacha::encrypt(&key, pt, &[]) {

@@ -112,3 +112,33 @@ impl Api {
         Ok((payload, mt))
     }
 }
+
+impl Api {
+    pub fn list_accounts(&self, admin_token: &str) -> Result<Vec<Account>, String> {
+        let resp = self.client.get(self.url("/admin/accounts")).header("x-admin-token", admin_token).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        resp.json().map_err(|e| e.to_string())
+    }
+    pub fn revoke_device(&self, admin_token: &str, device_id: &str) -> Result<(), String> {
+        let resp = self.client.post(self.url(&format!("/admin/devices/{}/revoke", device_id))).header("x-admin-token", admin_token).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        Ok(())
+    }
+    pub fn delete_account_admin(&self, admin_token: &str, account_id: &str) -> Result<(), String> {
+        let resp = self.client.delete(self.url(&format!("/admin/accounts/{}", account_id))).header("x-admin-token", admin_token).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        Ok(())
+    }
+    pub fn get_settings(&self, admin_token: &str) -> Result<serde_json::Value, String> {
+        let resp = self.client.get(self.url("/admin/settings")).header("x-admin-token", admin_token).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        resp.json().map_err(|e| e.to_string())
+    }
+    pub fn set_setting(&self, admin_token: &str, key: &str, value: &str) -> Result<(), String> {
+        let mut body = serde_json::Map::new();
+        body.insert(key.to_string(), serde_json::json!(value));
+        let resp = self.client.post(self.url("/admin/settings")).header("x-admin-token", admin_token).json(&body).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        Ok(())
+    }
+}

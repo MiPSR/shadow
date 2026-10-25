@@ -54,6 +54,8 @@ async fn main() {
         .route("/p2p/authorize", post(p2p::authorize))
         .route("/signals", get(signal::poll_signals))
         .route("/admin/accounts/:account_id", axum::routing::delete(auth::delete_account))
+        .route("/admin/accounts", get(auth::list_accounts))
+        .route("/admin/devices/:device_id/revoke", axum::routing::post(auth::revoke_device))
         .route("/accounts/:account_id/devices", get(auth::list_devices))
         .route("/devices/:device_id", get(auth::get_device))
         .merge(ws::router())
