@@ -2,6 +2,8 @@ mod api;
 mod app;
 mod config;
 mod storage;
+mod wsclient;
+mod backup;
 mod compat;
 mod media;
 mod voice;

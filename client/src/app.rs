@@ -27,6 +27,7 @@ pub struct ShadowApp {
     pub selected_channel: Option<String>,
     pub messages: Vec<EncryptedMessage>,
     pub channel_keys: HashMap<String, [u8; 32]>,
+    pub ws_messages: std::sync::Arc<std::sync::Mutex<Vec<EncryptedMessage>>>,
     pub voice: Option<crate::voice::VoiceSession>,
     pub screen_session: Option<crate::screen::ScreenSession>,
     pub peer_addr_input: String,
@@ -36,6 +37,13 @@ impl ShadowApp {
     pub fn new() -> Self {
         let config = load_config();
         let device = load_device();
+        let ws_messages = std::sync::Arc::new(std::sync::Mutex::new(Vec::<shared::protocol::EncryptedMessage>::new()));
+        if let Some(d) = &device {
+            if let Some(tok) = &d.session_token {
+                let url = config.server_url.replace("http", "ws") + "/ws";
+                crate::wsclient::start(url, tok.clone(), ws_messages.clone());
+            }
+        }
         let api = Api::new(config.server_url.clone());
         Self {
             server_url_input: config.server_url.clone(),
@@ -53,6 +61,7 @@ impl ShadowApp {
             selected_channel: None,
             messages: Vec::new(),
             channel_keys: HashMap::new(),
+            ws_messages: ws_messages.clone(),
             voice: None,
             screen_session: None,
             peer_addr_input: String::new(),
@@ -218,6 +227,9 @@ impl ShadowApp {
     }
 
     fn ui_main(&mut self, ctx: &Context) {
+        if let Ok(mut v) = self.ws_messages.lock() {
+            if !v.is_empty() { self.messages.extend(v.drain(..)); }
+        }
         // ensure login
         if !self.ensure_login() {
             egui::CentralPanel::default().show(ctx, |ui| {
