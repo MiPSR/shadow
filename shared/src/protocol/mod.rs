@@ -40,6 +40,7 @@ pub struct Channel {
     pub name: String,
     pub kind: ChannelKind,
     pub members: Vec<Id>, // account ids
+    pub last_activity: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -130,6 +131,8 @@ pub struct KeyAnnouncement {
 pub enum WsClientMessage {
     Auth { token: String },
     SendMessage { channel_id: Id, payload: String },
+    Typing { channel_id: Id },
+    Presence,
     KeyAnnounce { announcement: KeyAnnouncement },
     Ping,
 }
@@ -137,6 +140,8 @@ pub enum WsClientMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WsServerMessage {
     Message(EncryptedMessage),
+    Typing { channel_id: Id, device_id: Id },
+    Presence { device_id: Id, online: bool },
     KeyAnnounce(KeyAnnouncement),
     Error { message: String },
     Pong,

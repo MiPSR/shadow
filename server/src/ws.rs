@@ -45,6 +45,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                     match cm {
                         WsClientMessage::Auth { token } => {
                             if let Some(dev) = device_from_token(&state.pool, &token).await {
+                                let _ = state.broadcast.send(serde_json::to_string(&WsServerMessage::Presence { device_id: dev.clone(), online: true }).unwrap());
                                 device_id = Some(dev);
                             } else {
                                 let _ = state.broadcast.send(serde_json::to_string(&WsServerMessage::Error { message: "auth failed".into() }).unwrap());
@@ -77,12 +78,25 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                         WsClientMessage::Ping => {
                             let _ = state.broadcast.send(serde_json::to_string(&WsServerMessage::Pong).unwrap());
                         }
+                        WsClientMessage::Typing { channel_id } => {
+                            if let Some(dev) = &device_id {
+                                let _ = state.broadcast.send(serde_json::to_string(&WsServerMessage::Typing { channel_id, device_id: dev.clone() }).unwrap());
+                            }
+                        }
+                        WsClientMessage::Presence => {
+                            if let Some(dev) = &device_id {
+                                let _ = state.broadcast.send(serde_json::to_string(&WsServerMessage::Presence { device_id: dev.clone(), online: true }).unwrap());
+                            }
+                        }
                     }
                 }
             }
             Message::Close(_) => break,
             _ => {}
         }
+    }
+    if let Some(dev) = &device_id {
+        let _ = state.broadcast.send(serde_json::to_string(&WsServerMessage::Presence { device_id: dev.clone(), online: false }).unwrap());
     }
     send_task.abort();
 }

@@ -20,6 +20,12 @@ pub async fn set_setting(State(state): State<AppState>, headers: HeaderMap, Json
         for (k,v) in obj {
             // validate known settings
             if !matches!(k.as_str(), "message_retention_days" | "key_cache_hours" | "max_upload_bytes") { continue; }
+            // validate numeric
+            if let Some(s) = v.as_str() {
+                if k == "message_retention_days" || k == "key_cache_hours" || k == "max_upload_bytes" {
+                    if s.parse::<i64>().is_err() && s.parse::<u64>().is_err() { continue; }
+                }
+            }
             let val = v.as_str().map(|s| s.to_string()).unwrap_or_else(|| v.to_string());
             sqlx::query("INSERT OR REPLACE INTO settings (key, value) VALUES (?1,?2)")
                 .bind(k).bind(&val).execute(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;

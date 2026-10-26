@@ -21,6 +21,10 @@ pub struct ShadowApp {
     pub account_id_input: String,
     pub channel_name_input: String,
     pub message_input: String,
+    pub delete_message_input: String,
+    pub attachment_id_input: String,
+    pub last_refresh: i64,
+    pub channel_search_input: String,
     pub member_account_input: String,
     pub peer_device_input: String,
     pub backup_passphrase_input: String,
@@ -31,6 +35,8 @@ pub struct ShadowApp {
     pub messages: Vec<EncryptedMessage>,
     pub channel_keys: HashMap<String, Vec<([u8;32], i64)>>,
     pub ws_messages: std::sync::Arc<std::sync::Mutex<Vec<EncryptedMessage>>>,
+    pub typing: std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>,
+    pub presence: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     pub voice: Option<crate::voice::VoiceSession>,
     pub screen_session: Option<crate::screen::ScreenSession>,
     pub peer_addr_input: String,
@@ -41,10 +47,12 @@ impl ShadowApp {
         let config = load_config();
         let device = load_device();
         let ws_messages = std::sync::Arc::new(std::sync::Mutex::new(Vec::<shared::protocol::EncryptedMessage>::new()));
+        let typing = std::sync::Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));
+        let presence = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::<String>::new()));
         if let Some(d) = &device {
             if let Some(tok) = &d.session_token {
                 let url = config.server_url.replace("http", "ws") + "/ws";
-                crate::wsclient::start(url, tok.clone(), ws_messages.clone());
+                crate::wsclient::start(url, tok.clone(), ws_messages.clone(), typing.clone(), presence.clone());
             }
         }
         let api = Api::new(config.server_url.clone());
@@ -59,6 +67,10 @@ impl ShadowApp {
             account_id_input: String::new(),
             channel_name_input: String::new(),
             message_input: String::new(),
+            delete_message_input: String::new(),
+            attachment_id_input: String::new(),
+            last_refresh: 0,
+            channel_search_input: String::new(),
             member_account_input: String::new(),
             peer_device_input: String::new(),
             backup_passphrase_input: String::new(),
@@ -68,6 +80,8 @@ impl ShadowApp {
             messages: Vec::new(),
             channel_keys: HashMap::new(),
             ws_messages: ws_messages.clone(),
+            typing: typing.clone(),
+            presence: presence.clone(),
             voice: None,
             screen_session: None,
             peer_addr_input: String::new(),
@@ -292,10 +306,38 @@ impl ShadowApp {
                         Err(e) => self.status = e,
                     }
                 }
+                if ui.button("Revoke all devices").clicked() {
+                    match self.api.revoke_all_devices(&self.admin_token_input, &self.account_id_input) {
+                        Ok(()) => self.status = "all revoked".into(),
+                        Err(e) => self.status = e,
+                    }
+                }
                 if ui.button("Account data").clicked() {
                     match self.api.account_data(&self.admin_token_input, &self.account_id_input) {
                         Ok(v) => self.status = v.to_string(),
                         Err(e) => self.status = e,
+                    }
+                }
+                if ui.button("Admin stats").clicked() {
+                    match self.api.admin_stats(&self.admin_token_input) {
+                        Ok(v) => self.status = v.to_string(),
+                        Err(e) => self.status = e,
+                    }
+                }
+                if ui.button("Search accounts").clicked() {
+                    match self.api.search_accounts(&self.admin_token_input, &self.account_id_input) {
+                        Ok(v) => self.status = format!("{} results", v.len()),
+                        Err(e) => self.status = e,
+                    }
+                }
+                if ui.button("Audit log").clicked() {
+                    if let Some(dev) = &self.device {
+                        if let Some(tok) = &dev.session_token {
+                            match self.api.list_audit(tok) {
+                                Ok(v) => self.status = format!("{} audit entries", v.len()),
+                                Err(e) => self.status = e,
+                            }
+                        }
                     }
                 }
             });
@@ -342,7 +384,10 @@ impl ShadowApp {
     }
 
     fn ui_main(&mut self, ctx: &Context) {
-        if self.channels.is_empty() { self.refresh_channels(); }
+        if self.channels.is_empty() || chrono::Utc::now().timestamp() - self.last_refresh > 30 {
+            self.refresh_channels();
+            self.last_refresh = chrono::Utc::now().timestamp();
+        }
         if let Ok(mut v) = self.ws_messages.lock() {
             if !v.is_empty() { self.messages.extend(v.drain(..)); }
         }
@@ -361,6 +406,16 @@ impl ShadowApp {
         }
         egui::SidePanel::left("channels").show(ctx, |ui| {
             ui.heading("Channels");
+            ui.text_edit_singleline(&mut self.channel_search_input);
+            if ui.button("Search channels").clicked() {
+                if let Some(dev) = &self.device {
+                    if let Some(tok) = &dev.session_token {
+                        if let Ok(chs) = self.api.search_channels(tok, &self.channel_search_input) {
+                            self.channels = chs;
+                        }
+                    }
+                }
+            }
             if ui.button("Refresh").clicked() { self.refresh_channels(); }
             ui.text_edit_singleline(&mut self.channel_name_input);
             if ui.button("Create channel").clicked() {
@@ -418,7 +473,8 @@ impl ShadowApp {
             // list
             let mut sel = self.selected_channel.clone();
             for ch in &self.channels {
-                if ui.selectable_label(sel.as_deref() == Some(&ch.id), &ch.name).clicked() {
+                let label = if let Some(la) = ch.last_activity { format!("{} ({})", ch.name, la) } else { ch.name.clone() };
+                if ui.selectable_label(sel.as_deref() == Some(&ch.id), label).clicked() {
                     sel = Some(ch.id.clone());
                 }
             }
@@ -500,6 +556,9 @@ impl ShadowApp {
                     }
                 });
                 ui.separator();
+                if let Ok(v) = self.typing.lock() {
+                    if !v.is_empty() { ui.label("typing..."); }
+                }
                 ui.text_edit_singleline(&mut self.message_input);
                 if ui.button("Send").clicked() {
                     if let Some(dev) = &self.device {

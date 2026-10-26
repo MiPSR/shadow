@@ -9,7 +9,7 @@
   outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = nixpkgs.legacyPackages.${system};
+        pkgs = import nixpkgs { system = system; config.allowUnfree = true; };
         rustToolchain = pkgs.rustc; # placeholder
       in
       {
@@ -21,7 +21,7 @@
             packages = [ pkgs.cargo pkgs.rustc pkgs.rustfmt pkgs.clippy pkgs.pkg-config pkgs.openssl pkgs.sqlite ];
           };
           client = pkgs.mkShell {
-            packages = [ pkgs.cargo pkgs.rustc pkgs.rustfmt pkgs.clippy pkgs.pkg-config pkgs.openssl pkgs.alsa-lib pkgs.cmake pkgs.opus pkgs.xorg.libxcb pkgs.lld ];
+            packages = [ pkgs.cargo pkgs.rustc pkgs.rustfmt pkgs.clippy pkgs.pkg-config pkgs.openssl pkgs.alsa-lib pkgs.cmake pkgs.opus pkgs.xorg.libxcb pkgs.lld pkgs.ffmpeg pkgs.rustup pkgs.pkgsCross.mingwW64.stdenv.cc pkgs.android-tools ];
           };
         };
 

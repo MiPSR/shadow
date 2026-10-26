@@ -74,8 +74,27 @@ pub async fn migrate(pool: &SqlitePool) {
             payload TEXT NOT NULL,
             created_at INTEGER NOT NULL
         )"#,
+        r#"CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action TEXT NOT NULL,
+            actor TEXT,
+            target TEXT,
+            created_at INTEGER NOT NULL
+        )"#,
+        r#"CREATE TABLE IF NOT EXISTS devices (
+            id TEXT PRIMARY KEY,
+            account_id TEXT NOT NULL,
+            mldsa_pk TEXT NOT NULL,
+            mlkem_pk TEXT NOT NULL,
+            revoked INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            last_seen INTEGER
+        )"#,
     ];
     for s in stmts {
         sqlx::query(s).execute(pool).await.expect("migrate");
     }
+    // add last_activity column if missing
+    let _ = sqlx::query("ALTER TABLE channels ADD COLUMN last_activity INTEGER").execute(pool).await;
+    let _ = sqlx::query("ALTER TABLE devices ADD COLUMN last_seen INTEGER").execute(pool).await;
 }

@@ -28,7 +28,7 @@ pub async fn create_channel(
         .execute(&state.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(Channel { id, name: req.name, kind: req.kind, members: req.members }))
+    Ok(Json(Channel { id, name: req.name, kind: req.kind, members: req.members, last_activity: Some(chrono::Utc::now().timestamp()) }))
 }
 
 pub async fn list_channels(
@@ -37,12 +37,12 @@ pub async fn list_channels(
 ) -> Result<Json<Vec<Channel>>, StatusCode> {
     let token = token_from_headers(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
     let _dev = device_from_token(&state.pool, &token).await.ok_or(StatusCode::UNAUTHORIZED)?;
-    let rows: Vec<(String,String,String,String)> = sqlx::query_as("SELECT id,name,kind,members FROM channels")
+    let rows: Vec<(String,String,String,String,Option<i64>)> = sqlx::query_as("SELECT id,name,kind,members,last_activity FROM channels")
         .fetch_all(&state.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let mut out = Vec::new();
-    for (id,name,kind,members) in rows {
+    for (id,name,kind,members,last_activity) in rows {
         let members: Vec<Id> = serde_json::from_str(&members).unwrap_or_default();
         let kind = match kind.as_str() {
             "Direct" => ChannelKind::Direct,
@@ -51,7 +51,7 @@ pub async fn list_channels(
             "Voice" => ChannelKind::Voice,
             _ => ChannelKind::Text,
         };
-        out.push(Channel { id, name, kind, members });
+        out.push(Channel { id, name, kind, members, last_activity: None });
     }
     Ok(Json(out))
 }
@@ -82,7 +82,7 @@ pub async fn add_member(
         "Voice" => shared::protocol::ChannelKind::Voice,
         _ => shared::protocol::ChannelKind::Text,
     };
-    Ok(Json(shared::protocol::Channel { id, name, kind, members: mems }))
+    Ok(Json(shared::protocol::Channel { id, name, kind, members: mems, last_activity: None }))
 }
 
 pub async fn device_account(pool: &sqlx::SqlitePool, device_id: &str) -> Option<String> {
@@ -113,4 +113,83 @@ pub async fn delete_channel(
     sqlx::query("DELETE FROM messages WHERE channel_id=?1").bind(&channel_id).execute(&state.pool).await.ok();
     sqlx::query("DELETE FROM channels WHERE id=?1").bind(&channel_id).execute(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(serde_json::json!({"ok": true})))
+}
+
+pub async fn search_channels(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<Vec<Channel>>, StatusCode> {
+    let token = headers.get("authorization").and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer ")).map(|s| s.to_string())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let _dev = crate::auth::device_from_token(&state.pool, &token).await.ok_or(StatusCode::UNAUTHORIZED)?;
+    let q = params.get("q").cloned().unwrap_or_default();
+    let rows: Vec<(String,String,String,String,Option<i64>)> = sqlx::query_as("SELECT id,name,kind,members,last_activity FROM channels WHERE name LIKE ?1")
+        .bind(format!("%{}%", q))
+        .fetch_all(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let out = rows.into_iter().map(|(id,name,kind,members,last_activity)| {
+        let members: Vec<String> = serde_json::from_str(&members).unwrap_or_default();
+        let kind = match kind.as_str() {
+            "Direct" => shared::protocol::ChannelKind::Direct,
+            "Group" => shared::protocol::ChannelKind::Group,
+            "Text" => shared::protocol::ChannelKind::Text,
+            "Voice" => shared::protocol::ChannelKind::Voice,
+            _ => shared::protocol::ChannelKind::Text,
+        };
+        Channel { id, name, kind, members, last_activity: None }
+    }).collect();
+    Ok(Json(out))
+}
+
+pub async fn remove_member(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path((channel_id, account_id)): axum::extract::Path<(String, String)>,
+) -> Result<Json<Channel>, StatusCode> {
+    let token = headers.get("authorization").and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer ")).map(|s| s.to_string())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let _dev = crate::auth::device_from_token(&state.pool, &token).await.ok_or(StatusCode::UNAUTHORIZED)?;
+    let row: Option<(String,String,String,String)> = sqlx::query_as("SELECT id,name,kind,members FROM channels WHERE id=?1")
+        .bind(&channel_id).fetch_optional(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let Some((id,name,kind,members)) = row else { return Err(StatusCode::NOT_FOUND); };
+    let mut mems: Vec<String> = serde_json::from_str(&members).unwrap_or_default();
+    mems.retain(|m| m != &account_id);
+    let mems_json = serde_json::to_string(&mems).unwrap();
+    sqlx::query("UPDATE channels SET members=?1 WHERE id=?2").bind(&mems_json).bind(&channel_id).execute(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let kind = match kind.as_str() {
+        "Direct" => shared::protocol::ChannelKind::Direct,
+        "Group" => shared::protocol::ChannelKind::Group,
+        "Text" => shared::protocol::ChannelKind::Text,
+        "Voice" => shared::protocol::ChannelKind::Voice,
+        _ => shared::protocol::ChannelKind::Text,
+    };
+    Ok(Json(shared::protocol::Channel { id, name, kind, members: mems, last_activity: None }))
+}
+
+pub async fn rename_channel(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(channel_id): axum::extract::Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<Channel>, StatusCode> {
+    let token = headers.get("authorization").and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer ")).map(|s| s.to_string())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let _dev = crate::auth::device_from_token(&state.pool, &token).await.ok_or(StatusCode::UNAUTHORIZED)?;
+    let name = body.get("name").and_then(|v| v.as_str()).ok_or(StatusCode::BAD_REQUEST)?.to_string();
+    sqlx::query("UPDATE channels SET name=?1 WHERE id=?2").bind(&name).bind(&channel_id).execute(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let row: Option<(String,String,String,String,Option<i64>)> = sqlx::query_as("SELECT id,name,kind,members,last_activity FROM channels WHERE id=?1")
+        .bind(&channel_id).fetch_optional(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let Some((id,name,kind,members,last_activity)) = row else { return Err(StatusCode::NOT_FOUND); };
+    let members: Vec<String> = serde_json::from_str(&members).unwrap_or_default();
+    let kind = match kind.as_str() {
+        "Direct" => shared::protocol::ChannelKind::Direct,
+        "Group" => shared::protocol::ChannelKind::Group,
+        "Text" => shared::protocol::ChannelKind::Text,
+        "Voice" => shared::protocol::ChannelKind::Voice,
+        _ => shared::protocol::ChannelKind::Text,
+    };
+    Ok(Json(shared::protocol::Channel { id, name, kind, members, last_activity }))
 }

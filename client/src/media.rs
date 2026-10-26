@@ -75,3 +75,20 @@ pub fn wav_to_opus_ogg(bytes: &[u8]) -> Result<Vec<u8>, String> {
 
 pub fn video_supported() -> bool { false }
 pub fn audio_supported() -> bool { true }
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn video_to_webm(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    use std::process::Command;
+    use std::io::Write;
+    let tmp_in = std::env::temp_dir().join("shadow_in.mp4");
+    let tmp_out = std::env::temp_dir().join("shadow_out.webm");
+    std::fs::write(&tmp_in, bytes).map_err(|e| e.to_string())?;
+    let status = Command::new("ffmpeg")
+        .args(["-y", "-i", tmp_in.to_str().unwrap(), "-c:v", "libvpx-vp9", "-c:a", "libopus", "-b:v", "1M", tmp_out.to_str().unwrap()])
+        .status().map_err(|e| e.to_string())?;
+    if !status.success() { return Err("ffmpeg failed".into()); }
+    let out = std::fs::read(&tmp_out).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_file(&tmp_in);
+    let _ = std::fs::remove_file(&tmp_out);
+    Ok(out)
+}

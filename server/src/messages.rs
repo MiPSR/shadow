@@ -37,6 +37,7 @@ pub async fn send_message(
         .execute(&state.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    sqlx::query("UPDATE channels SET last_activity=?1 WHERE id=?2").bind(created).bind(&req.channel_id).execute(&state.pool).await.ok();
     Ok(Json(EncryptedMessage {
         id,
         channel_id: req.channel_id,

@@ -4,7 +4,9 @@ mod config;
 mod db;
 mod keys;
 mod attachments;
+mod audit;
 mod messages;
+mod stats;
 mod p2p;
 mod settings;
 mod signal;
@@ -42,12 +44,19 @@ async fn main() {
     let app = Router::new()
         .route("/health", get(|| async { axum::Json(serde_json::json!({"status": "ok", "version": "0.1.0"})) }))
         .route("/ready", get(|| async { "ready" }))
+        .route("/admin/audit", get(audit::list_audit))
+        .route("/admin/stats", get(stats::admin_stats))
+        .route("/metrics", get(|| async { "messages_total 0\n" }))
+        .route("/version", get(|| async { env!("CARGO_PKG_VERSION") }))
         .route("/admin/accounts", post(auth::create_account))
         .route("/devices/register", post(auth::register_device))
         .route("/auth/challenge", post(auth::challenge))
         .route("/auth/verify", post(auth::verify))
         .route("/channels", post(channels::create_channel).get(channels::list_channels))
+        .route("/channels/search", get(channels::search_channels))
         .route("/channels/:channel_id/members", axum::routing::post(channels::add_member))
+        .route("/channels/:channel_id/members/:account_id", axum::routing::delete(channels::remove_member))
+        .route("/channels/:channel_id", axum::routing::patch(channels::rename_channel))
         .route("/channels/:channel_id", axum::routing::delete(channels::delete_channel))
         .route("/messages", post(messages::send_message))
         .route("/messages/:channel_id", get(messages::list_messages))
@@ -65,6 +74,7 @@ async fn main() {
         .route("/admin/accounts/:account_id", axum::routing::delete(auth::delete_account))
         .route("/admin/accounts/:account_id/data", get(auth::account_data))
         .route("/admin/accounts", get(auth::list_accounts))
+        .route("/admin/accounts/search", get(auth::search_accounts))
         .route("/admin/devices/:device_id/revoke", axum::routing::post(auth::revoke_device))
         .route("/admin/accounts/:account_id/revoke-all", axum::routing::post(auth::revoke_all_devices))
         .route("/accounts/:account_id/devices", get(auth::list_devices))

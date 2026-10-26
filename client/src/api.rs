@@ -231,3 +231,60 @@ impl Api {
         Ok(())
     }
 }
+
+impl Api {
+    pub fn health(&self) -> Result<String, String> {
+        let resp = self.client.get(self.url("/health")).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        Ok(resp.text().unwrap_or_default())
+    }
+}
+
+impl Api {
+    pub fn search_channels(&self, token: &str, q: &str) -> Result<Vec<Channel>, String> {
+        let resp = self.client.get(self.url(&format!("/channels/search?q={}", urlencoding::encode(q)))).bearer_auth(token).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        resp.json().map_err(|e| e.to_string())
+    }
+}
+
+impl Api {
+    pub fn remove_channel_member(&self, token: &str, channel_id: &str, account_id: &str) -> Result<Channel, String> {
+        let resp = self.client.delete(self.url(&format!("/channels/{}/members/{}", channel_id, account_id))).bearer_auth(token).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        resp.json().map_err(|e| e.to_string())
+    }
+}
+
+impl Api {
+    pub fn list_audit(&self, token: &str) -> Result<Vec<serde_json::Value>, String> {
+        let resp = self.client.get(self.url("/admin/audit")).bearer_auth(token).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        resp.json().map_err(|e| e.to_string())
+    }
+}
+
+impl Api {
+    pub fn admin_stats(&self, token: &str) -> Result<serde_json::Value, String> {
+        let resp = self.client.get(self.url("/admin/stats")).bearer_auth(token).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        resp.json().map_err(|e| e.to_string())
+    }
+}
+
+impl Api {
+    pub fn search_accounts(&self, admin_token: &str, q: &str) -> Result<Vec<Account>, String> {
+        let resp = self.client.get(self.url(&format!("/admin/accounts/search?q={}", urlencoding::encode(q)))).header("x-admin-token", admin_token).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        resp.json().map_err(|e| e.to_string())
+    }
+}
+
+impl Api {
+    pub fn rename_channel(&self, token: &str, channel_id: &str, name: &str) -> Result<Channel, String> {
+        let body = serde_json::json!({"name": name});
+        let resp = self.client.patch(self.url(&format!("/channels/{}", channel_id))).bearer_auth(token).json(&body).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        resp.json().map_err(|e| e.to_string())
+    }
+}

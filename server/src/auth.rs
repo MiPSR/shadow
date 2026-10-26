@@ -104,6 +104,7 @@ pub async fn challenge(
         .fetch_optional(&state.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    sqlx::query("UPDATE devices SET last_seen=?1 WHERE id=?2").bind(now()).bind(&req.device_id).execute(&state.pool).await.ok();
     let Some((revoked,)) = row else { return Err(StatusCode::NOT_FOUND); };
     if revoked != 0 { return Err(StatusCode::FORBIDDEN); }
     let mut nonce = [0u8; 32];
@@ -304,4 +305,21 @@ pub async fn revoke_all_devices(
     sqlx::query("UPDATE devices SET revoked=1 WHERE account_id=?1").bind(&account_id).execute(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     sqlx::query("DELETE FROM sessions WHERE device_id IN (SELECT id FROM devices WHERE account_id=?1)").bind(&account_id).execute(&state.pool).await.ok();
     Ok(Json(serde_json::json!({"ok": true})))
+}
+
+pub async fn search_accounts(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<Vec<shared::protocol::Account>>, StatusCode> {
+    if !admin_authorized(&headers, &state) { return Err(StatusCode::FORBIDDEN); }
+    let q = params.get("q").cloned().unwrap_or_default();
+    let rows: Vec<(String,String,String,i64)> = sqlx::query_as("SELECT id, username, auth_methods, is_admin FROM accounts WHERE username LIKE ?1")
+        .bind(format!("%{}%", q))
+        .fetch_all(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let out = rows.into_iter().map(|(id,username,methods,is_admin)| {
+        let auth_methods: Vec<shared::protocol::AuthMethod> = serde_json::from_str(&methods).unwrap_or_default();
+        shared::protocol::Account { id, username, auth_methods, is_admin: is_admin != 0 }
+    }).collect();
+    Ok(Json(out))
 }
