@@ -84,3 +84,33 @@ pub async fn add_member(
     };
     Ok(Json(shared::protocol::Channel { id, name, kind, members: mems }))
 }
+
+pub async fn device_account(pool: &sqlx::SqlitePool, device_id: &str) -> Option<String> {
+    sqlx::query_scalar("SELECT account_id FROM devices WHERE id=?1")
+        .bind(device_id).fetch_optional(pool).await.ok().flatten()
+}
+
+pub async fn is_channel_member(pool: &sqlx::SqlitePool, channel_id: &str, account_id: &str) -> bool {
+    let row: Option<(String,)> = sqlx::query_as("SELECT members FROM channels WHERE id=?1")
+        .bind(channel_id).fetch_optional(pool).await.ok().flatten();
+    if let Some((members,)) = row {
+        if let Ok(mems) = serde_json::from_str::<Vec<String>>(&members) {
+            return mems.contains(&account_id.to_string());
+        }
+    }
+    false
+}
+
+pub async fn delete_channel(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(channel_id): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let token = headers.get("authorization").and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer ")).map(|s| s.to_string())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let _dev = crate::auth::device_from_token(&state.pool, &token).await.ok_or(StatusCode::UNAUTHORIZED)?;
+    sqlx::query("DELETE FROM messages WHERE channel_id=?1").bind(&channel_id).execute(&state.pool).await.ok();
+    sqlx::query("DELETE FROM channels WHERE id=?1").bind(&channel_id).execute(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(serde_json::json!({"ok": true})))
+}

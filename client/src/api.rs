@@ -175,3 +175,59 @@ impl Api {
         resp.json().map_err(|e| e.to_string())
     }
 }
+
+impl Api {
+    pub fn send_signal(&self, token: &str, to_device: &str, kind: &str, payload: &str, channel_id: Option<&str>) -> Result<(), String> {
+        let mut body = serde_json::json!({"to_device": to_device, "kind": kind, "payload": payload});
+        if let Some(c) = channel_id { body["channel_id"] = serde_json::json!(c); }
+        let resp = self.client.post(self.url("/signal")).bearer_auth(token).json(&body).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        Ok(())
+    }
+    pub fn poll_signals(&self, token: &str) -> Result<Vec<serde_json::Value>, String> {
+        let resp = self.client.get(self.url("/signals")).bearer_auth(token).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        resp.json().map_err(|e| e.to_string())
+    }
+}
+
+impl Api {
+    pub fn join_stream(&self, token: &str, channel_id: &str) -> Result<(), String> {
+        let body = serde_json::json!({"channel_id": channel_id});
+        let resp = self.client.post(self.url("/streams/join")).bearer_auth(token).json(&body).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        Ok(())
+    }
+}
+
+impl Api {
+    pub fn delete_channel(&self, token: &str, channel_id: &str) -> Result<(), String> {
+        let resp = self.client.delete(self.url(&format!("/channels/{}", channel_id))).bearer_auth(token).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        Ok(())
+    }
+}
+
+impl Api {
+    pub fn delete_message(&self, token: &str, id: &str) -> Result<(), String> {
+        let resp = self.client.delete(self.url(&format!("/messages/{}", id))).bearer_auth(token).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        Ok(())
+    }
+}
+
+impl Api {
+    pub fn delete_attachment(&self, token: &str, id: &str) -> Result<(), String> {
+        let resp = self.client.delete(self.url(&format!("/attachments/{}", id))).bearer_auth(token).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        Ok(())
+    }
+}
+
+impl Api {
+    pub fn revoke_all_devices(&self, admin_token: &str, account_id: &str) -> Result<(), String> {
+        let resp = self.client.post(self.url(&format!("/admin/accounts/{}/revoke-all", account_id))).header("x-admin-token", admin_token).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        Ok(())
+    }
+}

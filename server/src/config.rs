@@ -14,6 +14,8 @@ pub struct ServerConfig {
     pub key_cache_hours: i64,
     #[serde(default = "default_max_upload")]
     pub max_upload_bytes: u64,
+    #[serde(default = "default_web_root")]
+    pub web_root: Option<String>,
 }
 
 fn default_bind() -> String { "0.0.0.0:8080".into() }
@@ -22,6 +24,7 @@ fn default_bootstrap() -> String { "change-me".into() }
 fn default_retention_days() -> i64 { 7 }
 fn default_key_cache_hours() -> i64 { 24 }
 fn default_max_upload() -> u64 { 10 * 1024 * 1024 }
+fn default_web_root() -> Option<String> { None }
 
 impl Default for ServerConfig {
     fn default() -> Self {
@@ -32,6 +35,7 @@ impl Default for ServerConfig {
             message_retention_days: default_retention_days(),
             key_cache_hours: default_key_cache_hours(),
             max_upload_bytes: default_max_upload(),
+            web_root: default_web_root(),
         }
     }
 }

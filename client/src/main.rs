@@ -15,6 +15,8 @@ mod screen;
 #[cfg(not(target_arch = "wasm32"))]
 mod storage;
 #[cfg(not(target_arch = "wasm32"))]
+mod streaming;
+#[cfg(not(target_arch = "wasm32"))]
 mod p2p;
 #[cfg(not(target_arch = "wasm32"))]
 mod voice;
@@ -42,6 +44,11 @@ pub fn start(canvas_id: &str) -> Result<(), wasm_bindgen::JsValue> {
     let canvas = document.get_element_by_id(canvas_id).ok_or_else(|| wasm_bindgen::JsValue::from_str("canvas not found"))?;
     if canvas.dyn_ref::<web_sys::HtmlCanvasElement>().is_none() {
         return Err(wasm_bindgen::JsValue::from_str("invalid canvas"));
+    }
+    // WebGL2 check
+    let ctx = canvas.dyn_ref::<web_sys::HtmlCanvasElement>().unwrap().get_context("webgl2").ok().flatten();
+    if ctx.is_none() {
+        return Err(wasm_bindgen::JsValue::from_str("WebGL2 not supported"));
     }
     Ok(())
 }

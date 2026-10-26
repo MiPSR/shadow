@@ -6,20 +6,24 @@ use std::time::Duration;
 
 pub struct ScreenSession {
     pub running: Arc<Mutex<bool>>,
+    pub error: Arc<Mutex<Option<String>>>,
     pub handle: Option<thread::JoinHandle<()>>,
 }
 
 impl ScreenSession {
     pub fn start(peer: std::net::SocketAddr, key: [u8; 32]) -> Result<Self, String> {
         let running = Arc::new(Mutex::new(true));
+        let error = Arc::new(Mutex::new(None));
         let running_clone = running.clone();
+        let error_clone = error.clone();
         let handle = thread::spawn(move || {
-            if let Err(e) = run_screen(peer, key, running_clone.clone()) {
+            if let Err(e) = run_screen(peer, key, running_clone.clone(), error_clone.clone()) {
                 eprintln!("screen error: {}", e);
+                *error_clone.lock().unwrap() = Some(e);
             }
             *running_clone.lock().unwrap() = false;
         });
-        Ok(Self { running, handle: Some(handle) })
+        Ok(Self { running, error, handle: Some(handle) })
     }
 
     pub fn stop(&mut self) {
@@ -28,7 +32,7 @@ impl ScreenSession {
     }
 }
 
-fn run_screen(peer: std::net::SocketAddr, key: [u8; 32], running: Arc<Mutex<bool>>) -> Result<(), String> {
+fn run_screen(peer: std::net::SocketAddr, key: [u8; 32], running: Arc<Mutex<bool>>, error: Arc<Mutex<Option<String>>>) -> Result<(), String> {
     let display = Display::primary().map_err(|e| e.to_string())?;
     let w = display.width();
     let h = display.height();

@@ -7,20 +7,24 @@ use std::thread;
 
 pub struct VoiceSession {
     pub running: Arc<Mutex<bool>>,
+    pub error: Arc<Mutex<Option<String>>>,
     pub handle: Option<thread::JoinHandle<()>>,
 }
 
 impl VoiceSession {
     pub fn start(peer: SocketAddr, key: [u8; 32]) -> Result<Self, String> {
         let running = Arc::new(Mutex::new(true));
+        let error = Arc::new(Mutex::new(None));
         let running_clone = running.clone();
+        let error_clone = error.clone();
         let handle = thread::spawn(move || {
-            if let Err(e) = run_voice(peer, key, running_clone.clone()) {
+            if let Err(e) = run_voice(peer, key, running_clone.clone(), error_clone.clone()) {
                 eprintln!("voice error: {}", e);
+                *error_clone.lock().unwrap() = Some(e);
             }
             *running_clone.lock().unwrap() = false;
         });
-        Ok(Self { running, handle: Some(handle) })
+        Ok(Self { running, error, handle: Some(handle) })
     }
 
     pub fn stop(&mut self) {
@@ -29,7 +33,7 @@ impl VoiceSession {
     }
 }
 
-fn run_voice(peer: SocketAddr, key: [u8; 32], running: Arc<Mutex<bool>>) -> Result<(), String> {
+fn run_voice(peer: SocketAddr, key: [u8; 32], running: Arc<Mutex<bool>>, error: Arc<Mutex<Option<String>>>) -> Result<(), String> {
     let host = cpal::default_host();
     let input_dev = host.default_input_device().ok_or("no input device")?;
     let output_dev = host.default_output_device().ok_or("no output device")?;
@@ -111,8 +115,15 @@ fn run_voice(peer: SocketAddr, key: [u8; 32], running: Arc<Mutex<bool>>) -> Resu
 
     // receive loop
     let mut recv_buf = vec![0u8; 4096];
+    let mut last_recv = std::time::Instant::now();
     while *running.lock().unwrap() {
+        if last_recv.elapsed().as_secs() > 5 {
+            *error.lock().unwrap() = Some("no packets received".into());
+            *running.lock().unwrap() = false;
+            break;
+        }
         if let Ok((n, _)) = socket.recv_from(&mut recv_buf) {
+            last_recv = std::time::Instant::now();
             let pkt = &recv_buf[..n];
             if pkt.len() >= 24 {
                 let (nonce, ct) = pkt.split_at(24);

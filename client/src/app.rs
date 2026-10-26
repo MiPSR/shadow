@@ -22,6 +22,8 @@ pub struct ShadowApp {
     pub channel_name_input: String,
     pub message_input: String,
     pub member_account_input: String,
+    pub peer_device_input: String,
+    pub backup_passphrase_input: String,
     pub status: String,
     // data
     pub channels: Vec<Channel>,
@@ -58,6 +60,8 @@ impl ShadowApp {
             channel_name_input: String::new(),
             message_input: String::new(),
             member_account_input: String::new(),
+            peer_device_input: String::new(),
+            backup_passphrase_input: String::new(),
             status: String::new(),
             channels: Vec::new(),
             selected_channel: None,
@@ -288,13 +292,57 @@ impl ShadowApp {
                         Err(e) => self.status = e,
                     }
                 }
+                if ui.button("Account data").clicked() {
+                    match self.api.account_data(&self.admin_token_input, &self.account_id_input) {
+                        Ok(v) => self.status = v.to_string(),
+                        Err(e) => self.status = e,
+                    }
+                }
             });
             ui.separator();
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let caps = crate::compat::detect();
+                ui.label(format!("Audio input: {}  Audio output: {}", caps.audio_input, caps.audio_output));
+                if !caps.audio_input || !caps.audio_output {
+                    ui.label("Warning: audio capability missing; voice disabled.");
+                }
+            }
+            ui.separator();
+            ui.label("Backup passphrase");
+            ui.text_edit_singleline(&mut self.backup_passphrase_input);
+            if ui.button("Export device backup").clicked() {
+                if let Some(dev) = &self.device {
+                    match crate::backup::export(dev, &self.backup_passphrase_input) {
+                        Ok(b) => { self.status = b; }
+                        Err(e) => self.status = e,
+                    }
+                } else { self.status = "no device".into(); }
+            }
+            ui.text_edit_singleline(&mut self.message_input);
+            if ui.button("Import device backup").clicked() {
+                match crate::backup::import(&self.message_input, &self.backup_passphrase_input) {
+                    Ok(dk) => { crate::storage::save_device(&dk).ok(); self.device = Some(dk); self.screen = Screen::Main; self.status = "imported".into(); }
+                    Err(e) => self.status = e,
+                }
+            }
+            ui.separator();
             ui.label(&self.status);
+            if let Some(v) = &self.voice {
+                if let Ok(e) = v.error.lock() {
+                    if let Some(msg) = e.as_ref() { ui.label(format!("voice error: {}", msg)); }
+                }
+            }
+            if let Some(v) = &self.screen_session {
+                if let Ok(e) = v.error.lock() {
+                    if let Some(msg) = e.as_ref() { ui.label(format!("screen error: {}", msg)); }
+                }
+            }
         });
     }
 
     fn ui_main(&mut self, ctx: &Context) {
+        if self.channels.is_empty() { self.refresh_channels(); }
         if let Ok(mut v) = self.ws_messages.lock() {
             if !v.is_empty() { self.messages.extend(v.drain(..)); }
         }
@@ -376,10 +424,15 @@ impl ShadowApp {
             }
             if sel != self.selected_channel {
                 self.selected_channel = sel.clone();
+                // auto-rotate if older than 7 days
+                if let Some(ch) = self.selected_channel.clone() {
+                    let need_rotate = self.channel_keys.get(&ch).and_then(|v| v.last()).map(|(_,t)| chrono::Utc::now().timestamp() - *t > 7 * 86400).unwrap_or(false);
+                    if need_rotate { self.rotate_channel_key(ch); }
+                }
                 // load messages
                 if let (Some(ch), Some(dev)) = (&self.selected_channel, &self.device) {
                     if let Some(tok) = &dev.session_token {
-                        // fetch key announcements first
+                        // auto-rotate if older than 7 days
                         if let Ok(anns) = self.api.fetch_key_announcements(tok) {
                             for ann in anns {
                                 if ann.channel_id.as_deref() == Some(ch) {
@@ -443,7 +496,7 @@ impl ShadowApp {
                         } else {
                             format!("[no key] {}", m.payload)
                         };
-                        ui.label(format!("{}: {}", m.sender_device_id, text));
+                        ui.label(format!("{} [{}]: {}", m.sender_device_id, m.created_at, text));
                     }
                 });
                 ui.separator();
@@ -515,9 +568,59 @@ impl ShadowApp {
                         }
                     }
                 }
+                if ui.button("Rotate key").clicked() {
+                    if let Some(ch) = self.selected_channel.clone() {
+                        self.rotate_channel_key(ch);
+                    }
+                }
             } else {
                 ui.label("Select a channel");
             }
         });
+    }
+}
+
+impl ShadowApp {
+    pub fn rotate_channel_key(&mut self, ch: String) {
+        if let Some(dev) = self.device.clone() {
+            if let Some(tok) = dev.session_token.clone() {
+                let mut key = [0u8; 32];
+                getrandom::getrandom(&mut key).ok();
+                let entry = self.channel_keys.entry(ch.clone()).or_default();
+                entry.push((key, chrono::Utc::now().timestamp()));
+                // redistribute
+                let members: Vec<String> = self.channels.iter().find(|c| c.id == ch).map(|c| c.members.clone()).unwrap_or_default();
+                for m in members {
+                    if m == dev.account_id { continue; }
+                    if let Ok(devs) = self.api.list_devices(&tok, &m) {
+                        for d in devs {
+                            if d.revoked { continue; }
+                            if let Ok(pk) = crypto::b64_decode(&d.mlkem_pk) {
+                                if let Ok((ss, ct)) = crypto::mlkem::encapsulate(&pk) {
+                                    let mut sskey = [0u8; 32];
+                                    if ss.len() >= 32 { sskey.copy_from_slice(&ss[..32]); }
+                                    if let Ok(w) = crypto::xchacha::encrypt(&sskey, &key, &[]) {
+                                        let msg = format!("key:{}:{}:{}", dev.device_id, d.id, ch);
+                                        let sk = crypto::b64_decode(&dev.mldsa_sk).unwrap();
+                                        let sig = crypto::mldsa::sign(&sk, msg.as_bytes()).unwrap();
+                                        let ann = KeyAnnouncement {
+                                            from_device: dev.device_id.clone(),
+                                            to_device: d.id.clone(),
+                                            channel_id: Some(ch.clone()),
+                                            kem_ciphertext: crypto::b64_encode(&ct),
+                                            nonce: crypto::b64_encode(&w.0),
+                                            wrapped_key: crypto::b64_encode(&w.1),
+                                            signature: crypto::b64_encode(&sig),
+                                        };
+                                        let _ = self.api.announce_key(&tok, &ann);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                self.status = "key rotated".into();
+            }
+        }
     }
 }

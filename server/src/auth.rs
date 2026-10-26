@@ -49,13 +49,14 @@ pub async fn register_device(
     State(state): State<AppState>,
     Json(req): Json<RegisterDeviceRequest>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    // verify account exists
-    let exists: Option<(String,)> = sqlx::query_as("SELECT id FROM accounts WHERE id=?1")
+    // verify account exists and allows DeviceKey
+    let exists: Option<(String, String)> = sqlx::query_as("SELECT id, auth_methods FROM accounts WHERE id=?1")
         .bind(&req.account_id)
         .fetch_optional(&state.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    if exists.is_none() { return Err(StatusCode::NOT_FOUND); }
+    let Some((_, methods)) = exists else { return Err(StatusCode::NOT_FOUND); };
+    if !methods.contains("DeviceKey") { return Err(StatusCode::FORBIDDEN); }
 
     // verify signature: device signs "register:{account_id}:{device_id}:{mldsa_pk}:{mlkem_pk}"
     let msg = format!("register:{}:{}:{}:{}", req.account_id, req.device_id, req.mldsa_pk, req.mlkem_pk);
@@ -173,6 +174,9 @@ pub async fn device_from_token(pool: &SqlitePool, token: &str) -> Option<String>
         .ok()?;
     let (dev, exp) = row?;
     if exp < now() { return None; }
+    // check revoked
+    let revoked: Option<i64> = sqlx::query_scalar("SELECT revoked FROM devices WHERE id=?1").bind(&dev).fetch_optional(pool).await.ok().flatten();
+    if revoked.unwrap_or(1) != 0 { return None; }
     Some(dev)
 }
 
@@ -289,4 +293,15 @@ pub async fn account_data(
         "account": {"id": id, "username": username, "auth_methods": methods, "is_admin": is_admin},
         "devices": devices.into_iter().map(|(d,)| d).collect::<Vec<_>>(),
     })))
+}
+
+pub async fn revoke_all_devices(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(account_id): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if !admin_authorized(&headers, &state) { return Err(StatusCode::FORBIDDEN); }
+    sqlx::query("UPDATE devices SET revoked=1 WHERE account_id=?1").bind(&account_id).execute(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    sqlx::query("DELETE FROM sessions WHERE device_id IN (SELECT id FROM devices WHERE account_id=?1)").bind(&account_id).execute(&state.pool).await.ok();
+    Ok(Json(serde_json::json!({"ok": true})))
 }

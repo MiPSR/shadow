@@ -38,3 +38,14 @@ pub async fn download(
     let Some((payload, media_type, size)) = row else { return Err(StatusCode::NOT_FOUND); };
     Ok(Json(serde_json::json!({"id": id, "payload": payload, "media_type": media_type, "size": size})))
 }
+
+pub async fn delete_attachment(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let tok = token(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
+    let _dev = device_from_token(&state.pool, &tok).await.ok_or(StatusCode::UNAUTHORIZED)?;
+    sqlx::query("DELETE FROM attachments WHERE id=?1").bind(&id).execute(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(serde_json::json!({"ok": true})))
+}

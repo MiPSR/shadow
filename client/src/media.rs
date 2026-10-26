@@ -72,3 +72,6 @@ pub fn wav_to_opus_ogg(bytes: &[u8]) -> Result<Vec<u8>, String> {
     let _ = pw.write_packet(&[], 1, ogg::PacketWriteEndInfo::EndStream, granule);
     Ok(out.into_inner())
 }
+
+pub fn video_supported() -> bool { false }
+pub fn audio_supported() -> bool { true }

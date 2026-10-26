@@ -16,6 +16,21 @@ pub async fn announce_key(
     let token = token_from_headers(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
     let dev = device_from_token(&state.pool, &token).await.ok_or(StatusCode::UNAUTHORIZED)?;
     if dev != ann.from_device { return Err(StatusCode::FORBIDDEN); }
+    // verify from_device not revoked and signature
+    let from_row: Option<(String, i64)> = sqlx::query_as("SELECT mldsa_pk, revoked FROM devices WHERE id=?1")
+        .bind(&ann.from_device).fetch_optional(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let Some((pk_b64, revoked)) = from_row else { return Err(StatusCode::NOT_FOUND); };
+    if revoked != 0 { return Err(StatusCode::FORBIDDEN); }
+    let to_exists: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM devices WHERE id=?1")
+        .bind(&ann.to_device).fetch_optional(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if to_exists.is_none() { return Err(StatusCode::NOT_FOUND); }
+    let pk = shared::crypto::b64_decode(&pk_b64).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let sig = shared::crypto::b64_decode(&ann.signature).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let channel = ann.channel_id.clone().unwrap_or_default();
+    let msg = format!("key:{}:{}:{}", ann.from_device, ann.to_device, channel);
+    if !shared::crypto::mldsa::verify(&pk, msg.as_bytes(), &sig) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
     sqlx::query("INSERT INTO key_announcements (from_device, to_device, channel_id, kem_ciphertext, nonce, wrapped_key, signature, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)")
         .bind(&ann.from_device)
         .bind(&ann.to_device)
