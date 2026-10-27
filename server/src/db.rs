@@ -97,4 +97,6 @@ pub async fn migrate(pool: &SqlitePool) {
     // add last_activity column if missing
     let _ = sqlx::query("ALTER TABLE channels ADD COLUMN last_activity INTEGER").execute(pool).await;
     let _ = sqlx::query("ALTER TABLE devices ADD COLUMN last_seen INTEGER").execute(pool).await;
+    let _ = sqlx::query("ALTER TABLE channels ADD COLUMN archived INTEGER DEFAULT 0").execute(pool).await;
+    let _ = sqlx::query("ALTER TABLE messages ADD COLUMN pinned INTEGER DEFAULT 0").execute(pool).await;
 }

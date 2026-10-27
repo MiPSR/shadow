@@ -60,7 +60,8 @@ async fn main() {
         .route("/channels/:channel_id", axum::routing::delete(channels::delete_channel))
         .route("/messages", post(messages::send_message))
         .route("/messages/:channel_id", get(messages::list_messages))
-        .route("/messages/:id", axum::routing::delete(messages::delete_message))
+        .route("/messages/:id", axum::routing::delete(messages::delete_message).put(messages::edit_message))
+        .route("/messages/:id/pin", axum::routing::post(messages::pin_message))
         .route("/keys/announce", post(keys::announce_key))
         .route("/keys/announcements", get(keys::fetch_key_announcements))
         .route("/admin/settings", get(settings::get_settings).post(settings::set_setting))
@@ -79,6 +80,7 @@ async fn main() {
         .route("/admin/accounts/:account_id/revoke-all", axum::routing::post(auth::revoke_all_devices))
         .route("/accounts/:account_id/devices", get(auth::list_devices))
         .route("/devices/:device_id", get(auth::get_device))
+        .layer(tower_http::trace::TraceLayer::new_for_http())
         .merge(ws::router())
         .fallback_service(tower_http::services::ServeDir::new(cfg.web_root.clone().unwrap_or_else(|| "web".into())))
         .with_state(state.clone());

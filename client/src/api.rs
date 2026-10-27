@@ -288,3 +288,36 @@ impl Api {
         resp.json().map_err(|e| e.to_string())
     }
 }
+
+impl Api {
+    pub fn clear_channel(&self, token: &str, channel_id: &str) -> Result<(), String> {
+        let resp = self.client.post(self.url(&format!("/channels/{}/clear", channel_id))).bearer_auth(token).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        Ok(())
+    }
+}
+
+impl Api {
+    pub fn edit_message(&self, token: &str, id: &str, payload: &str) -> Result<EncryptedMessage, String> {
+        let body = serde_json::json!({"payload": payload});
+        let resp = self.client.put(self.url(&format!("/messages/{}", id))).bearer_auth(token).json(&body).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        resp.json().map_err(|e| e.to_string())
+    }
+}
+
+impl Api {
+}
+
+impl Api {
+    pub fn pin_message(&self, token: &str, id: &str) -> Result<(), String> {
+        let resp = self.client.post(self.url(&format!("/messages/{}/pin", id))).bearer_auth(token).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        Ok(())
+    }
+    pub fn archive_channel(&self, token: &str, channel_id: &str) -> Result<(), String> {
+        let resp = self.client.post(self.url(&format!("/channels/{}/archive", channel_id))).bearer_auth(token).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        Ok(())
+    }
+}

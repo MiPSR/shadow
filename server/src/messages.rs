@@ -99,3 +99,44 @@ pub async fn delete_message(
     sqlx::query("DELETE FROM messages WHERE id=?1").bind(&id).execute(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(serde_json::json!({"ok": true})))
 }
+
+pub async fn edit_message(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<EncryptedMessage>, StatusCode> {
+    let token = token_from_headers(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
+    let dev = device_from_token(&state.pool, &token).await.ok_or(StatusCode::UNAUTHORIZED)?;
+    let payload = body.get("payload").and_then(|v| v.as_str()).ok_or(StatusCode::BAD_REQUEST)?.to_string();
+    if payload.len() as u64 > state.config.max_upload_bytes { return Err(StatusCode::PAYLOAD_TOO_LARGE); }
+    let sender: Option<String> = sqlx::query_scalar("SELECT sender_device_id FROM messages WHERE id=?1")
+        .bind(&id).fetch_optional(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.flatten();
+    let Some(sender_dev) = sender else { return Err(StatusCode::NOT_FOUND); };
+    if sender_dev != dev { return Err(StatusCode::FORBIDDEN); }
+    sqlx::query("UPDATE messages SET payload=?1 WHERE id=?2").bind(&payload).bind(&id).execute(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let row: Option<(String,String,i64,String)> = sqlx::query_as("SELECT channel_id, sender_device_id, created_at, payload FROM messages WHERE id=?1")
+        .bind(&id).fetch_optional(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let Some((channel_id, sender_device_id, created_at, payload)) = row else { return Err(StatusCode::NOT_FOUND); };
+    Ok(Json(EncryptedMessage { id, channel_id, sender_device_id, created_at, payload }))
+}
+
+pub async fn pin_message(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let token = token_from_headers(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
+    let dev = device_from_token(&state.pool, &token).await.ok_or(StatusCode::UNAUTHORIZED)?;
+    // admin or sender
+    let sender: Option<String> = sqlx::query_scalar("SELECT sender_device_id FROM messages WHERE id=?1")
+        .bind(&id).fetch_optional(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.flatten();
+    let Some(sender_dev) = sender else { return Err(StatusCode::NOT_FOUND); };
+    if sender_dev != dev {
+        let acct = channels::device_account(&state.pool, &dev).await;
+        let is_admin = if let Some(a) = acct { sqlx::query_scalar::<_, i64>("SELECT is_admin FROM accounts WHERE id=?1").bind(&a).fetch_optional(&state.pool).await.ok().flatten().unwrap_or(0) != 0 } else { false };
+        if !is_admin { return Err(StatusCode::FORBIDDEN); }
+    }
+    sqlx::query("UPDATE messages SET pinned=1 WHERE id=?1").bind(&id).execute(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(serde_json::json!({"ok": true})))
+}

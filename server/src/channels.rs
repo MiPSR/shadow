@@ -193,3 +193,33 @@ pub async fn rename_channel(
     };
     Ok(Json(shared::protocol::Channel { id, name, kind, members, last_activity }))
 }
+
+pub async fn clear_channel(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(channel_id): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let token = headers.get("authorization").and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer ")).map(|s| s.to_string())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let dev = crate::auth::device_from_token(&state.pool, &token).await.ok_or(StatusCode::UNAUTHORIZED)?;
+    let acct = crate::channels::device_account(&state.pool, &dev).await.ok_or(StatusCode::FORBIDDEN)?;
+    if !crate::channels::is_channel_member(&state.pool, &channel_id, &acct).await {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    sqlx::query("DELETE FROM messages WHERE channel_id=?1").bind(&channel_id).execute(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
+pub async fn archive_channel(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(channel_id): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let token = headers.get("authorization").and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer ")).map(|s| s.to_string())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let _dev = crate::auth::device_from_token(&state.pool, &token).await.ok_or(StatusCode::UNAUTHORIZED)?;
+    sqlx::query("UPDATE channels SET archived=1 WHERE id=?1").bind(&channel_id).execute(&state.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(serde_json::json!({"ok": true})))
+}
