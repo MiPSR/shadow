@@ -321,3 +321,11 @@ impl Api {
         Ok(())
     }
 }
+
+impl Api {
+    pub fn version(&self) -> Result<String, String> {
+        let resp = self.client.get(self.url("/version")).send().map_err(|e| e.to_string())?;
+        if !resp.status().is_success() { return Err(resp.text().unwrap_or_default()); }
+        Ok(resp.text().unwrap_or_default())
+    }
+}
